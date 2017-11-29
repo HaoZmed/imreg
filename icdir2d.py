@@ -1,17 +1,23 @@
 from utils import *
 import numpy as np 
 
+
+
 class Parameters(object):
     def __init__(self, max_iter,
                  max_corr,
                  lb_sigma,
                  weight_fitting,
+                 weight_corr,
                  step_size):
         self.max_iter = max_iter
         self.max_corr = max_corr
         self.lb_sigma = lb_sigma
         self.weight_fitting = weight_fitting
+        self.weight_corr = weight_corr
         self.step_size = step_size
+
+
 
 class Logs(object):
     def __init__(self, max_iter):
@@ -21,13 +27,14 @@ class Logs(object):
 
 
 
-def imreg_deformation(S, T, max_iter=200,
-                      max_corr=0.995,
-                      lb_sigma=0.1,
-                      weight_fitting=1,
-                      step_size=1e-3,
-                      silent=True,
-                      print_frequency=5):
+def imreg_deformation(S, T, max_iter,
+                      max_corr,
+                      lb_sigma,
+                      weight_fitting,
+                      weight_corr,
+                      step_size,
+                      silent,
+                      print_frequency):
     """ Calculate deformation fields that maps the source image
     and the target image to each other. The function will calculate
     the deformation fields such that:
@@ -49,20 +56,20 @@ def imreg_deformation(S, T, max_iter=200,
         Xiaojing Ye
     """
 
-    # Setting up hyper-parameters
-    params = Parameters(max_iter, max_corr, lb_sigma, weight_fitting, step_size)
+   # Setting up hyper-parameters
+    params = Parameters(max_iter, max_corr, lb_sigma, weight_fitting, weight_corr, step_size)
     log    = Logs(max_iter)
     N = S.size
 
     # Initialization of the algorithm
-    [dx_S, dy_S] = gradient(S);
-    [dx_T, dy_T] = gradient(T);
-    
-    dS = np.concatenate([dx_S, dy_S], axis=2)
-    dT = np.concatenate([dx_T, dy_T], axis=2)
-    
+    [dy_S, dx_S] = gradient(S);
+    [dy_T, dx_T] = gradient(T);
+
+    dS = np.dstack([dy_S, dx_S])
+    dT = np.dstack([dy_T, dx_T])
+
     null = np.zeros((S.shape))
-    dnull = np.concatenate([null, null], axis=2)
+    dnull = np.dstack([null, null])
 
     u  = np.zeros((S.shape + (2,)))
     v  = np.zeros((S.shape + (2,)))
@@ -75,34 +82,59 @@ def imreg_deformation(S, T, max_iter=200,
     curr_corr = 0
     iter = 0
 
+    if not silent:
+        print("iter = {}, corr = {}".format(iter, corr2(S, T)))
+
     # Main loop
     while iter < max_iter and curr_corr < max_corr:
         
+        iter += 1
+
         # Update deformation fields
         u  = evol(u, ui, dS, iterp_S, iterp_T, sigma, params)
         ui = evol(ui, u, dnull, null, null, sigma, params)
 
-        v  = evol(v, vi, dS, iterp_T, iterp_S, sigma, params)
+        v  = evol(v, vi, dT, iterp_T, iterp_S, sigma, params)
         vi = evol(vi, v, dnull, null, null, sigma, params)
-        
+
         # Update deformed images
         iterp_S = my_interp2(S, u)
         iterp_T = my_interp2(T, v)
 
         # Update sigma
         sigma = np.linalg.norm(iterp_S - iterp_T) / np.sqrt(N)
-
         curr_corr = corr2(iterp_S, iterp_T)
 
         if sigma < lb_sigma:
             sigma = lb_sigma
         
-        log.corr[iter] = curr_corr
-        log.obj[iter] = calculate_objective(u, sigma, params)
+        # log.corr[iter] = curr_corr
+#         log.obj[iter] = calculate_objective(u, sigma, params)
 
-        if not silent and print_frequency % iter == 0:
+        if not silent and iter % print_frequency == 0:
             print("iter = {}, corr = {}".format(iter, curr_corr))        
 
-        iter += 1
-
     return u, ui, v, vi
+
+
+
+def imreg_intermediate(S, T, max_iter=200,
+                       max_corr=0.999,
+                       lb_sigma=5e-3,
+                       weight_fitting=0.3,
+                       weight_corr=1,
+                       step_size=0.1,
+                       silent=True,
+                       print_frequency=5):
+    
+    u, ui, v, vi = imreg_deformation(S, T, max_iter,
+                                     max_corr,
+                                     lb_sigma,
+                                     weight_fitting,
+                                     weight_corr,
+                                     step_size,
+                                     silent,
+                                     print_frequency)
+    Su = my_interp2(S, u)
+    Tv = my_interp2(T, v)
+    return Su, Tv
