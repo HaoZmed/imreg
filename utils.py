@@ -118,3 +118,77 @@ def evol(u, v, dS, interp_S, T, sigma, params):
         -c*R*interp_dxS - params.weight_corr*icc2, params.step_size)
 
     return w
+
+
+
+# Checked
+def laplace_evol_2D(u, f, d):
+    """ Evolution function in 2D based on Additive Operator Splitting (AOS)
+        Scheme. Thomas tridiagonal solver.
+            du/dt = Lap(u) +f 
+    Input:
+        u : deformation field (one direction) - h x w ndarray
+        f :                                   - h x w ndarray
+        d : scalar
+    Output:
+        u : deformation field (one direction) - h x w ndarray
+    """
+    h, w = u.shape
+    N = u.size
+    r = (u + d * f)
+
+    xa = -2 * d * np.concatenate((np.ones((h - 1, w)),
+                                  np.zeros((1, w))),
+                                 axis=0).T.reshape((N, 1))
+    xb = -2 * d * np.concatenate((np.zeros((1, w)),
+                                  np.ones((h - 1, w))),
+                                 axis=0).T.reshape((N, 1))
+
+    ya = -2 * d * np.concatenate((np.ones((w - 1, h)),
+                                  np.zeros((1, h))),
+                                 axis=0).T.reshape((N, 1))
+    yb = -2 * d * np.concatenate((np.zeros((1, h)),
+                                  np.ones((w - 1, h))),
+                                 axis=0).T.reshape((N, 1))
+    
+    ux = thomas(xa, 1 - xa - xb, xb, r.T.reshape((N, 1))).reshape((w, h)).T
+    uy = thomas(ya, 1 - ya - yb, yb, r.reshape((N, 1))).reshape((h, w)).T
+    
+    u = (ux + uy.T)/2
+    return u
+
+
+
+
+
+# Checked
+def thomas(ud, d, ld, r):
+    """ Solve the linear system Ax = b, where A is a tridiagonal matrix
+    Inputs:
+        ud: upper diagonal of A, ud(n - 1) = 0 - n x 1 array
+        d : diagonal of A                      - n x 1 array   
+        ld: lower diagonal of A, ld(0) = 0     - n x 1 array
+        r : right-hand-side of equation        - n x 1 array
+    Outputs:
+        x: the solution
+    """
+
+    N = d.size
+    ud[0] = ud[0] / d[0]
+    r[0] = r[0] / d[0]
+
+    for i in range(1, N - 1):
+        denom = d[i] - ld[i] * ud[i - 1]
+        if denom == 0:
+            sys.exit("Division with zero error.")
+        ud[i] = ud[i] / denom
+        r[i] = (r[i] - ld[i] * r[i - 1]) / denom
+    
+    r[N - 1] = (r[N - 1] - ld[N - 1] * r[N - 2]) /\
+        (d[N - 1] - ld[N - 1] * ud[N - 2])
+    x = np.zeros((N, 1))
+    x[N - 1] = r[N - 1]
+    for i in range(N - 2, -1, -1):
+        x[i] = r[i] - ud[i] * x[i + 1]
+    
+    return x.reshape((N, 1))
